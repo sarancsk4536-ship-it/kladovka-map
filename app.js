@@ -13,6 +13,11 @@ let ALL_DATA=SNAPSHOT,DATA=[],visible=[],baseVisible=[],map=null,clusters=null,m
 let neighbourhoodLayer=null,neighbourhoodsEnabled=false,activeArea=null;
 let activeNetwork=null,inspectorMode=null,zonesEnabled=false,zone=null,ringLayer=null,areaLayer=null,canvas=null;
 let lastLoaded='резервный снимок от 25.10.2026';
+const OVERLAY_KEY='kladovka-map-overlays-v1';let overlayDismissed={sync:false,legend:false},mapPopupOpen=false;
+try{const p=JSON.parse(localStorage.getItem(OVERLAY_KEY));if(p)overlayDismissed={sync:p.sync===true,legend:p.legend===true};}catch(e){}
+function updateMapOverlays(){document.querySelector('.sync-box').hidden=mapPopupOpen||overlayDismissed.sync;document.querySelector('.map-note').hidden=mapPopupOpen||overlayDismissed.legend;$('restore-sync').hidden=mapPopupOpen||!overlayDismissed.sync;$('restore-legend').hidden=mapPopupOpen||!overlayDismissed.legend;}
+function dismissMapOverlay(name,hidden){if(!['sync','legend'].includes(name))return;overlayDismissed[name]=hidden;try{localStorage.setItem(OVERLAY_KEY,JSON.stringify(overlayDismissed));}catch(e){}updateMapOverlays();}
+
 function hydrate(p){p.scenarios=Array.isArray(p.scenarios)?p.scenarios:String(p.scenarios||'').split(/[;\n]/).map(x=>x.trim()).filter(Boolean);const areas=MapFeatures.areasFor(p,NEIGHBOURHOODS.features);p.areaIds=areas.map(f=>f.properties.id);p.neighbourhood=['Контур не определён','Вне Владивостока'].includes(p.neighbourhood)?'':p.neighbourhood;p.neighbourhood=areas[0]?.properties.name||p.neighbourhood||'';if(areas.length)p.population=areas[0].properties.population;p.key=/^https?:\/\//.test(p.card||'')?p.card:String(p.row);return p;}
 function applyData(rows){ALL_DATA=rows.map(hydrate);DATA=ALL_DATA.filter(MapFeatures.isCompetitor);if(activeNetwork&&!DATA.some(p=>MapFeatures.networkInfo(p).key===activeNetwork))activeNetwork=null;}
 applyData(ALL_DATA);
@@ -46,8 +51,8 @@ function initMap(){
  if(!window.L){$('tile-note').textContent='Карта не запустилась. Список и фильтры доступны; обновите страницу.';return;}
  map=L.map('map',{scrollWheelZoom:true,zoomControl:false}).setView([43.16,131.94],12);
  L.control.zoom({position:'topright'}).addTo(map);
- map.on('popupopen',()=>{document.querySelector('.sync-box').hidden=true;document.querySelector('.map-note').hidden=true;$('zone-hint').hidden=true;$('inspector').hidden=true;inspectorMode=null;if(window.matchMedia('(max-width:620px)').matches)document.querySelector('.map-wrap').scrollIntoView({behavior:'smooth',block:'start'});});
- map.on('popupclose',()=>{document.querySelector('.sync-box').hidden=false;document.querySelector('.map-note').hidden=false;});
+ map.on('popupopen',()=>{mapPopupOpen=true;updateMapOverlays();$('zone-hint').hidden=true;$('inspector').hidden=true;inspectorMode=null;if(window.matchMedia('(max-width:620px)').matches)document.querySelector('.map-wrap').scrollIntoView({behavior:'smooth',block:'start'});});
+ map.on('popupclose',()=>{mapPopupOpen=false;updateMapOverlays();});
  let tilesOK=0,tileErrors=0;
  const base=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>'});
  base.on('tileload',()=>{tilesOK++;$('tile-note').hidden=true;});
@@ -166,7 +171,7 @@ function parseSheet(resp){
  const get=(r,h,raw=false)=>{const c=r.c[idx.get(h)];return raw?(c?.v??null):(c?.f??c?.v??'');};
  return resp.table.rows.map((r,i)=>hydrate({row:i+2,name:String(get(r,'Наименование')),competitor_status:get(r,'Конкурент / нет'),neighbourhood:get(r,'Микрорайон (карта)'),population:num(get(r,'Население микрорайона, оценка 2025',true)),contacts:get(r,'Контакты (2ГИС)'),branch_count:get(r,'Филиалов по 2ГИС',true),location_revenue:get(r,'Выручка по адресу — ориентир юрлица, руб.',true),revenue_scope:get(r,'Статус выручки по адресу'),enrichment_note:get(r,'Источники / что уточнить'),city:get(r,'Населённый пункт'),district:get(r,'Район'),address:get(r,'Адрес'),operator_name:get(r,'Юрлицо / ИП (см. статус)'),operator_inn:String(get(r,'ИНН (см. статус)')).replace(/\s/g,''),link_status:get(r,'Статус привязки'),floor:get(r,'Этаж / помещение'),hours:get(r,'Время работы'),rubrics:get(r,'Описание / ассортимент по рубрикам 2ГИС'),lat:num(get(r,'Широта магазина',true)),lon:num(get(r,'Долгота магазина',true)),parking:get(r,'Парковка для фильтра'),parking_spaces:get(r,'Мест на ближайшей парковке'),parking_paid:get(r,'Ближайшая парковка платная'),parking_access:get(r,'Доступ к ближайшей парковке'),parking_distance:get(r,'До парковки по прямой, м'),parking_location:get(r,'Местоположение ближайшей парковки'),parking_url:get(r,'Карта ближайшей парковки'),format:get(r,'Формат для карты'),scenarios:get(r,'Сценарии конкуренции (оценка)'),tasks:get(r,'Задачи покупателя (примеры)'),basis:get(r,'Основание оценки ассортимента'),sources:String(get(r,'Источники ассортимента')).split('\n').filter(Boolean),card:get(r,'Карточка 2ГИС'),bfo_url:get(r,'Карточка ГИР БО'),revenue:get(r,'Выручка юрлица, руб. — повтор по филиалам',true),income:get(r,'Доходы юрлица ФНС, руб. — повтор',true)})).filter(p=>p.name);
 }
-function showSync(kind,text){$('sync').dataset.state=kind;$('sync').textContent=text;}
+function showSync(kind,text){$('sync').dataset.state=kind;$('sync').textContent=text;updateMapOverlays();}
 function refresh(){
  if(busy)return;busy=true;$('refresh').disabled=true;showSync('loading','Читаю Google Sheets…');
  const cb='kladovkaRead'+Date.now(),script=document.createElement('script');
@@ -196,9 +201,10 @@ $('reset').addEventListener('click',()=>{resetFilters();activeNetwork=null;inspe
 $('more').addEventListener('click',()=>{limit+=60;draw(false);});
 $('list').addEventListener('click',e=>{const b=e.target.closest('[data-network]');if(b)selectNetwork(b.dataset.network);});
 $('zones').addEventListener('click',()=>toggleZones());$('zone-summary').addEventListener('click',()=>renderArea(true));
-$('inspector-close').addEventListener('click',()=>{$('inspector').hidden=true;inspectorMode=null;document.querySelector('.sync-box').hidden=false;$('zone-hint').hidden=!zonesEnabled;});
+$('inspector-close').addEventListener('click',()=>{$('inspector').hidden=true;inspectorMode=null;updateMapOverlays();$('zone-hint').hidden=!zonesEnabled;});
 $('inspector-body').addEventListener('change',e=>{if(e.target.id==='zone-use-filters'&&zone){zone.useFilters=e.target.checked;renderArea(true);}});
 document.addEventListener('click',e=>{
+ const closeOverlay=e.target.closest('[data-map-overlay-close]');if(closeOverlay){dismissMapOverlay(closeOverlay.dataset.mapOverlayClose,true);return;}const openOverlay=e.target.closest('[data-map-overlay-open]');if(openOverlay){dismissMapOverlay(openOverlay.dataset.mapOverlayOpen,false);return;}
  const point=e.target.closest('[data-point]');if(point){selectPlace(point.dataset.point);return;}
  const area=e.target.closest('[data-area-point]');if(area){const p=DATA.find(p=>p.key===area.dataset.areaPoint);if(p)analyseArea(p,p.name,p.key);return;}
  const areaFilter=e.target.closest('[data-neighbourhood-filter]');if(areaFilter){resetFilters();activeNetwork=null;$('neighbourhood').value=areaFilter.dataset.neighbourhoodFilter;draw(true);renderNeighbourhood(areaFilter.dataset.neighbourhoodFilter,false);return;}
