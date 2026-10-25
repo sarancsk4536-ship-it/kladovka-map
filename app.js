@@ -74,7 +74,7 @@ function draw(fit=false){
  $('active-network').innerHTML=network?`<b>${esc(network.title)}</b><span>${visible.length} из ${network.points.length} точек</span><button type="button" data-action="network-open">Филиалы</button><button type="button" data-action="network-clear" aria-label="Показать все сети">×</button>`:'';
  $('time-fields').hidden=$('hours-filter').value!=='at';
  if(clusters){clusters.clearLayers();const ms=mapped.map(p=>markers.get(p.key)).filter(Boolean);if(clusters.addLayers)clusters.addLayers(ms);else ms.forEach(m=>clusters.addLayer(m));if(fit&&mapped.length)map.fitBounds(L.latLngBounds(mapped.map(p=>[p.lat,p.lon])),{padding:[38,38],maxZoom:15,animate:false});}
- drawNeighbourhoods();drawRings();if(zone)renderArea(false);if(inspectorMode==='network')renderNetwork();if(inspectorMode==='neighbourhood'&&activeArea)renderNeighbourhood(activeArea,false);
+ drawNeighbourhoods();drawRings();if(zone)renderArea(false);if(inspectorMode==='network')renderNetwork();if(inspectorMode==='neighbourhood'&&activeArea)renderNeighbourhood(activeArea,false);window.KladovkaRecommendations?.update();
 }
 function selectPlace(key){
  const p=DATA.find(p=>p.key===key);if(!p)return;selected=key;
@@ -86,7 +86,7 @@ function selectPlace(key){
  else{$('detail-content').innerHTML=popup(p);$('detail').showModal();}
 }
 function resetFilters(){for(const id of ['search','city','district','neighbourhood','format','scenario','parking','confidence','finance-scope','hours-filter'])$(id).value='';limit=60;}
-function openInspector(mode,title,body){inspectorMode=mode;$('inspector-title').textContent=title;$('inspector-body').innerHTML=body;$('inspector').hidden=false;if(window.matchMedia('(max-width:620px)').matches)document.querySelector('.map-wrap').scrollIntoView({behavior:'smooth',block:'start'});}
+function openInspector(mode,title,body){const resetScroll=inspectorMode!==mode||$('inspector-title').textContent!==title;$('inspector').classList.toggle('rec-mode',mode.startsWith('recommendation'));inspectorMode=mode;$('inspector-title').textContent=title;$('inspector-body').innerHTML=body;if(resetScroll)$('inspector-body').scrollTop=0;$('inspector').hidden=false;if(window.matchMedia('(max-width:620px)').matches)document.querySelector('.map-wrap').scrollIntoView({behavior:'smooth',block:'start'});}
 function selectNetwork(key){activeNetwork=key;map?.closePopup();inspectorMode='network';draw(true);renderNetwork();}
 function branchButton(p,metres=null){return `<button class="branch" type="button" data-point="${esc(p.key)}"><b>${esc(p.name)}</b><span>${esc(p.address||'Адрес не опубликован')}${known(p.floor)?' · '+esc(p.floor):''}</span><small>${metres!==null?Math.round(metres)+' м по прямой · ':''}${esc(known(p.hours)?p.hours.split('\n')[0]:'Расписание не указано')}</small></button>`;}
 function renderNetwork(){
