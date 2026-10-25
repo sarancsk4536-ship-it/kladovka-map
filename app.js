@@ -25,7 +25,7 @@ function hydrate(p){
  const inferred=AssortmentModel.derive(p.category_names,CATALOGUE);
  p.categories=inferred.categories;p.unknown_categories=inferred.unknown;p.inactive_categories=inferred.inactive;p.category_links=inferred.links;
  p.scenarios=inferred.scenarios;p.tasks=inferred.tasks.join('\n');
-const areas=MapFeatures.areasFor(p,NEIGHBOURHOODS.features);p.areaIds=areas.map(f=>f.properties.id);p.neighbourhood=['Контур не определён','Вне Владивостока'].includes(p.neighbourhood)?'':p.neighbourhood;p.neighbourhood=areas[0]?.properties.name||p.neighbourhood||'';if(areas.length)p.population=areas[0].properties.population;p.key=/^https?:\/\//.test(p.card||'')?p.card:String(p.row);return p;}
+const areas=MapFeatures.areasFor(p,NEIGHBOURHOODS.features);p.areaIds=areas.map(f=>f.properties.id);p.neighbourhood=['Контур не определён','Вне Владивостока'].includes(p.neighbourhood)?'':p.neighbourhood;if(p.neighbourhood?.startsWith('Чуркин')&&!areas.some(f=>f.properties.id==='working-13')){p.neighbourhood='';p.population=null;}p.neighbourhood=areas[0]?.properties.name||p.neighbourhood||'';if(areas.length)p.population=areas[0].properties.population;p.key=/^https?:\/\//.test(p.card||'')?p.card:String(p.row);return p;}
 function applyData(rows){ALL_DATA=rows.map(hydrate);DATA=ALL_DATA.filter(MapFeatures.isCompetitor);if(activeNetwork&&!DATA.some(p=>MapFeatures.networkInfo(p).key===activeNetwork))activeNetwork=null;}
 applyData(ALL_DATA);
 function optionList(id,key,first){
