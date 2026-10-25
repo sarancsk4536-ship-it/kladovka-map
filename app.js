@@ -1,6 +1,6 @@
 'use strict';
 const SHEET_ID='1bTyx8eIPhnzij_5aPb3AVSiPx8Ky_nJpjnsYHM2aOpc', GID='1117777643';
-const CACHE_KEY='kladovka-map-v3-'+GID;
+const CACHE_KEY='kladovka-map-v4-'+GID;
 const $=id=>document.getElementById(id);
 const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fold=x=>String(x??'').toLocaleLowerCase('ru').replaceAll('ё','е');
@@ -10,11 +10,13 @@ const hasCoords=p=>Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&Math.abs(p.la
 const money=n=>n!==null&&n!==''&&Number.isFinite(num(n))?num(n).toLocaleString('ru-RU')+' ₽':'нет данных';
 const known=x=>x!==null&&x!==undefined&&!['','о','o','н/д','нет данных'].includes(fold(x).trim());
 const colours={'Гипермаркет':'#a47352','Минимаркет':'#65784c','Супермаркет / продукты':'#607c8a','Товары для дома и специалисты':'#b39c60'};
-let DATA=SNAPSHOT,visible=[],baseVisible=[],map=null,clusters=null,markers=new Map(),busy=false,limit=60,selected=null;
+let ALL_DATA=SNAPSHOT,DATA=[],visible=[],baseVisible=[],map=null,clusters=null,markers=new Map(),busy=false,limit=60,selected=null;
+let neighbourhoodLayer=null,neighbourhoodsEnabled=false,activeArea=null;
 let activeNetwork=null,inspectorMode=null,zonesEnabled=false,zone=null,ringLayer=null,areaLayer=null,canvas=null;
 let lastLoaded='резервный снимок от 25.10.2026';
-function hydrate(p){p.scenarios=Array.isArray(p.scenarios)?p.scenarios:String(p.scenarios||'').split(/[;\n]/).map(x=>x.trim()).filter(Boolean);p.key=/^https?:\/\//.test(p.card||'')?p.card:String(p.row);return p;}
-DATA.forEach(hydrate);
+function hydrate(p){p.scenarios=Array.isArray(p.scenarios)?p.scenarios:String(p.scenarios||'').split(/[;\n]/).map(x=>x.trim()).filter(Boolean);const areas=MapFeatures.areasFor(p,NEIGHBOURHOODS.features);p.areaIds=areas.map(f=>f.properties.id);p.neighbourhood=['Контур не определён','Вне Владивостока'].includes(p.neighbourhood)?'':p.neighbourhood;p.neighbourhood=p.neighbourhood||areas[0]?.properties.name||'';p.key=/^https?:\/\//.test(p.card||'')?p.card:String(p.row);return p;}
+function applyData(rows){ALL_DATA=rows.map(hydrate);DATA=ALL_DATA.filter(MapFeatures.isCompetitor);if(activeNetwork&&!DATA.some(p=>MapFeatures.networkInfo(p).key===activeNetwork))activeNetwork=null;}
+applyData(ALL_DATA);
 function optionList(id,key,first){
  const el=$(id),value=el.value;
  const counts=new Map();for(const p of DATA){for(const v of key==='scenarios'?p.scenarios:[p[key]||'Не указан'])counts.set(v,(counts.get(v)||0)+1);}
@@ -22,12 +24,12 @@ function optionList(id,key,first){
  for(const [v,n] of [...counts].sort((a,b)=>a[0].localeCompare(b[0],'ru')))el.add(new Option(`${v} · ${n}`,v));
  if([...el.options].some(o=>o.value===value))el.value=value;
 }
-function fillFilters(){optionList('city','city','Все населённые пункты');optionList('district','district','Все районы');optionList('format','format','Все форматы');optionList('scenario','scenarios','Все сценарии');optionList('parking','parking','Любая ситуация с парковкой');}
+function fillFilters(){optionList('city','city','Все населённые пункты');optionList('district','district','Все районы');optionList('format','format','Все форматы');optionList('scenario','scenarios','Все сценарии');optionList('parking','parking','Любая ситуация с парковкой');fillNeighbourhoodFilter();}
 function link(url,label){return href(url)?`<a href="${href(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`:'';}
 function popup(p){
  const access={'residents_only':'только для жителей','handicapped_only':'только для людей с инвалидностью','emobile_only':'только для электромобилей','landing_place':'место высадки','Общедоступная':'общедоступная'}[p.parking_access]||p.parking_access||'не указан';
  const dist=num(p.parking_distance);
- return `<div class="popup-title">${esc(p.name)}</div><div>${esc(p.address||'Адрес не опубликован')}</div><div class="popup-topline">Этаж / помещение: <b>${esc(known(p.floor)?p.floor:'не указан')}</b></div><div class="small">${esc(p.hours||'Время работы не указано')}</div><div class="chips">${p.scenarios.map(s=>`<span>${esc(s)}</span>`).join('')}</div><div class="popup-caption">КОНКУРЕНЦИЯ ПО ЗАДАЧАМ</div><div class="task-lines">${esc(p.tasks||'Нет подтверждённых задач')}</div><div class="small evidence">${esc(p.basis)}</div><div class="popup-caption">ПАРКОВКА</div><b>${esc(p.parking)}</b><div class="small">Мест: ${esc(p.parking_spaces||'нет данных')} · Платная: ${esc(p.parking_paid||'нет данных')}${Number.isFinite(dist)?` · ${dist} м по прямой`:''}<br>Доступ: ${esc(known(access)?access:'не указан')}<br>${esc(p.parking_location||'Ближайшая парковка не установлена')}</div><div class="small">Ближайшая нанесённая парковка; принадлежность магазину не подтверждена.</div><div class="popup-caption">ЮРЛИЦО И ФИНАНСЫ</div><div>${esc(p.operator_name||'Юрлицо не установлено')}${p.operator_inn?'<br>ИНН '+esc(p.operator_inn):''}</div><div class="small">${esc(p.link_status||'Привязка не установлена')}</div>${p.operator_inn?`<div class="small">Выручка юрлица за 2025: <b>${money(p.revenue)}</b><br>Показатель всего юрлица, не отдельного магазина.</div>`:''}<div class="popup-links">${hasCoords(p)?'<button type="button" class="subtle-btn" data-area-point="'+esc(p.key)+'">Сценарии в 500 м</button>':''}${link(p.card,'2ГИС')}${link(p.parking_url,'Парковка')}${link(p.bfo_url,'ГИР БО')}${link('https://docs.google.com/spreadsheets/d/'+SHEET_ID+'/edit#gid='+GID+'&range=A'+p.row,'Строка таблицы')}</div><details><summary>Источники ассортимента</summary>${(p.sources||[]).map((s,i)=>link(s,'Источник '+(i+1))).join('<br>')}</details>`;
+ return `<div class="popup-title">${esc(p.name)}</div><div>${esc(p.address||'Адрес не опубликован')}</div>${p.neighbourhood?'<div class="popup-topline">Микрорайон: <b>'+esc(p.neighbourhood)+'</b></div>':''}<div class="popup-topline">Этаж / помещение: <b>${esc(known(p.floor)?p.floor:'не указан')}</b></div><div class="small">${esc(p.hours||'Время работы не указано')}</div><div class="chips">${p.scenarios.map(s=>`<span>${esc(s)}</span>`).join('')}</div><div class="popup-caption">КОНКУРЕНЦИЯ ПО ЗАДАЧАМ</div><div class="task-lines">${esc(p.tasks||'Нет подтверждённых задач')}</div><div class="small evidence">${esc(p.basis)}</div><div class="popup-caption">ПАРКОВКА</div><b>${esc(p.parking)}</b><div class="small">Мест: ${esc(p.parking_spaces||'нет данных')} · Платная: ${esc(p.parking_paid||'нет данных')}${Number.isFinite(dist)?` · ${dist} м по прямой`:''}<br>Доступ: ${esc(known(access)?access:'не указан')}<br>${esc(p.parking_location||'Ближайшая парковка не установлена')}</div><div class="small">Ближайшая нанесённая парковка; принадлежность магазину не подтверждена.</div>${p.contacts?'<div class="popup-caption">КОНТАКТЫ</div><div class="task-lines">'+esc(p.contacts)+'</div>':''}<div class="popup-caption">ЮРЛИЦО И ФИНАНСЫ</div><div>${esc(p.operator_name||'Юрлицо не установлено')}${p.operator_inn?'<br>ИНН '+esc(p.operator_inn):''}</div><div class="small">${esc(p.link_status||'Привязка не установлена')}</div>${p.operator_inn?`<div class="small">Выручка юрлица за 2025: <b>${money(p.revenue)}</b><br>Показатель всего юрлица, не отдельного магазина.</div>`:''}<div class="small evidence"><b>Связь с адресом</b><br>${esc(p.revenue_scope||'Выручка отдельного магазина не установлена')}${num(p.location_revenue)!==null?'<br>Ориентир по связанному юрлицу за 2025: <b>'+money(p.location_revenue)+'</b>':''}<br>Рентабельность места требует затрат, аренды и выручки самого магазина.</div><div class="popup-links">${hasCoords(p)?'<button type="button" class="subtle-btn" data-area-point="'+esc(p.key)+'">Сценарии в 500 м</button>':''}${link(p.card,'2ГИС')}${link(p.parking_url,'Парковка')}${link(p.bfo_url,'ГИР БО')}${link('https://docs.google.com/spreadsheets/d/'+SHEET_ID+'/edit#gid='+GID+'&range=A'+p.row,'Строка таблицы')}</div><details><summary>Источники ассортимента</summary>${(p.sources||[]).map((s,i)=>link(s,'Источник '+(i+1))).join('<br>')}</details>`;
 }
 function initMap(){
  if(!window.L){$('tile-note').textContent='Карта не запустилась. Список и фильтры доступны; обновите страницу.';return;}
@@ -42,6 +44,7 @@ function initMap(){
  base.addTo(map);
  clusters=typeof L.markerClusterGroup==='function'?L.markerClusterGroup({showCoverageOnHover:false,maxClusterRadius:38,iconCreateFunction:c=>L.divIcon({html:String(c.getChildCount()),className:'cluster',iconSize:[36,36]})}):L.featureGroup();
  clusters.addTo(map);
+ neighbourhoodLayer=L.layerGroup();
  canvas=L.canvas({padding:.5});ringLayer=L.layerGroup().addTo(map);areaLayer=L.layerGroup().addTo(map);
  map.on('click',e=>{if(zonesEnabled)analyseArea({lat:e.latlng.lat,lon:e.latlng.lng},'Выбранное место');});
 }
@@ -57,21 +60,21 @@ function confidence(p){return p.basis?.startsWith('Каталог')?'catalog':p.
 function draw(fit=false){
  const q=fold($('search').value),level=$('confidence').value;
  const chosenTime=$('open-time').value.split(':').map(Number),now=MapFeatures.vladivostokTime();
- baseVisible=DATA.filter(p=>(!$('city').value||(p.city||'Не указан')===$('city').value)&&(!$('district').value||(p.district||'Не указан')===$('district').value)&&(!$('format').value||p.format===$('format').value)&&(!$('scenario').value||p.scenarios.includes($('scenario').value))&&(!$('parking').value||p.parking===$('parking').value)&&(!level||level==='documented'&&confidence(p)!=='hypothesis'||level===confidence(p))&&MapFeatures.hoursMatch(p,$('hours-filter').value,Number($('open-day').value),chosenTime[0]*60+chosenTime[1],now)&&(!q||fold([p.name,p.address,p.operator_name,p.operator_inn,p.tasks,p.scenarios.join(' ')].join(' ')).includes(q)));
+ baseVisible=DATA.filter(p=>(!$('city').value||(p.city||'Не указан')===$('city').value)&&(!$('district').value||(p.district||'Не указан')===$('district').value)&&(!$('neighbourhood').value||$('neighbourhood').value==='__outside'&&p.city==='Владивосток'&&!p.areaIds.length||p.areaIds.includes($('neighbourhood').value))&&(!$('format').value||p.format===$('format').value)&&(!$('scenario').value||p.scenarios.includes($('scenario').value))&&(!$('parking').value||p.parking===$('parking').value)&&(!level||level==='documented'&&confidence(p)!=='hypothesis'||level===confidence(p))&&(!$('finance-scope').value||$('finance-scope').value==='address'&&num(p.location_revenue)!==null||$('finance-scope').value==='inn'&&Boolean(p.operator_inn)||$('finance-scope').value==='unknown'&&!p.operator_inn)&&MapFeatures.hoursMatch(p,$('hours-filter').value,Number($('open-day').value),chosenTime[0]*60+chosenTime[1],now)&&(!q||fold([p.name,p.address,p.operator_name,p.operator_inn,p.tasks,p.neighbourhood,p.scenarios.join(' ')].join(' ')).includes(q)));
  visible=activeNetwork?baseVisible.filter(p=>MapFeatures.networkInfo(p).key===activeNetwork):baseVisible;
  const groups=MapFeatures.groupNetworks(baseVisible);
  const mapped=visible.filter(hasCoords);
  $('count').textContent=`${visible.length.toLocaleString('ru')} магазинов`;
  $('count-meta').textContent=`${mapped.length} на карте · ${visible.length-mapped.length} без координат · ${groups.length} групп в списке`;
- $('total').textContent=DATA.length+' точек в таблице';
+ $('total').textContent=DATA.length+' конкурентов · '+(ALL_DATA.length-DATA.length)+' исключено в таблице';
  $('list').innerHTML=groups.slice(0,limit).map(g=>{const scenarios=[...new Set(g.points.flatMap(p=>p.scenarios))];return `<button class="place network-card ${g.key===activeNetwork?'selected-network':''}" type="button" data-network="${esc(g.key)}"><span class="place-title"><span>${esc(g.title)}</span><b class="branch-count">${g.points.length}</b></span><span class="place-address">${g.points.length>1?(g.verified?'Сеть':'Группа по названию')+' · выбрать филиал':esc(g.points[0].address||'Адрес не опубликован')}</span><span class="place-scenario">${esc(scenarios.slice(0,3).join(' · '))}${scenarios.length>3?' +'+(scenarios.length-3):''}</span></button>`;}).join('')||'<div class="empty">По выбранным условиям магазинов нет. Измените фильтры.</div>';
  $('more').hidden=groups.length<=limit;
  const network=activeNetwork?MapFeatures.groupNetworks(DATA).find(g=>g.key===activeNetwork):null;
  $('active-network').hidden=!network;
  $('active-network').innerHTML=network?`<b>${esc(network.title)}</b><span>${visible.length} из ${network.points.length} точек</span><button type="button" data-action="network-open">Филиалы</button><button type="button" data-action="network-clear" aria-label="Показать все сети">×</button>`:'';
  $('time-fields').hidden=$('hours-filter').value!=='at';
- if(clusters){clusters.clearLayers();const ms=mapped.map(p=>markers.get(p.key)).filter(Boolean);if(clusters.addLayers)clusters.addLayers(ms);else ms.forEach(m=>clusters.addLayer(m));if(fit&&mapped.length)map.fitBounds(L.latLngBounds(mapped.map(p=>[p.lat,p.lon])),{padding:[38,38],maxZoom:15});}
- drawRings();if(zone)renderArea(false);if(inspectorMode==='network')renderNetwork();
+ if(clusters){clusters.clearLayers();const ms=mapped.map(p=>markers.get(p.key)).filter(Boolean);if(clusters.addLayers)clusters.addLayers(ms);else ms.forEach(m=>clusters.addLayer(m));if(fit&&mapped.length)map.fitBounds(L.latLngBounds(mapped.map(p=>[p.lat,p.lon])),{padding:[38,38],maxZoom:15,animate:false});}
+ drawNeighbourhoods();drawRings();if(zone)renderArea(false);if(inspectorMode==='network')renderNetwork();if(inspectorMode==='neighbourhood'&&activeArea)renderNeighbourhood(activeArea,false);
 }
 function selectPlace(key){
  const p=DATA.find(p=>p.key===key);if(!p)return;selected=key;
@@ -82,7 +85,7 @@ function selectPlace(key){
  else if(map&&hasCoords(p)){L.popup({maxWidth:370,minWidth:270,maxHeight:440}).setLatLng([p.lat,p.lon]).setContent(popup(p)).openOn(map);map.setView([p.lat,p.lon],16);}
  else{$('detail-content').innerHTML=popup(p);$('detail').showModal();}
 }
-function resetFilters(){for(const id of ['search','city','district','format','scenario','parking','confidence','hours-filter'])$(id).value='';limit=60;}
+function resetFilters(){for(const id of ['search','city','district','neighbourhood','format','scenario','parking','confidence','finance-scope','hours-filter'])$(id).value='';limit=60;}
 function openInspector(mode,title,body){inspectorMode=mode;$('inspector-title').textContent=title;$('inspector-body').innerHTML=body;$('inspector').hidden=false;if(window.matchMedia('(max-width:620px)').matches)document.querySelector('.map-wrap').scrollIntoView({behavior:'smooth',block:'start'});}
 function selectNetwork(key){activeNetwork=key;map?.closePopup();inspectorMode='network';draw(true);renderNetwork();}
 function branchButton(p,metres=null){return `<button class="branch" type="button" data-point="${esc(p.key)}"><b>${esc(p.name)}</b><span>${esc(p.address||'Адрес не опубликован')}${known(p.floor)?' · '+esc(p.floor):''}</span><small>${metres!==null?Math.round(metres)+' м по прямой · ':''}${esc(known(p.hours)?p.hours.split('\n')[0]:'Расписание не указано')}</small></button>`;}
@@ -113,9 +116,35 @@ function renderArea(open=true){
  $('zone-summary').hidden=false;
  if(!open&&inspectorMode!=='area')return;
  const documented=near.filter(x=>confidence(x.point)!=='hypothesis').length;
- const body=`<p class="inspect-sub">${esc(zone.title)}<br>${zone.lat.toFixed(5)}, ${zone.lon.toFixed(5)}</p><div class="zone-metric"><b>${near.length}</b><span>магазинов в радиусе 500 м<br>${documented} по источникам · ${near.length-documented} гипотез</span></div><label class="zone-scope"><input id="zone-use-filters" type="checkbox" ${zone.useFilters?'checked':''}> Учитывать фильтры карты</label><p class="inspect-note">${zone.useFilters?'Выборка ограничена текущими фильтрами.':'Все сети из таблицы, независимо от фильтров карты.'} ${zone.excludeKey?'Точка в центре исключена из подсчёта.':''} Расстояние по прямой, не время пути.</p><p class="inspect-sub">Сценарии конкуренции · нажмите для списка точек</p><div class="area-scenarios">${summary.map(s=>`<details class="area-scenario"><summary><span>${esc(s.name)}<small>${s.total?s.documented+' по источникам · '+s.hypothesis+' гипотез':'Не найдены в этой выгрузке'}</small></span><b>${s.total}</b></summary>${near.filter(x=>x.point.scenarios.includes(s.name)).map(x=>branchButton(x.point,x.metres)).join('')}</details>`).join('')}</div><p class="inspect-note">Магазин может участвовать в нескольких сценариях. Ноль означает отсутствие точек в данных, а не отсутствие конкуренции на рынке.</p>`;
+ const body=`<p class="inspect-sub">${esc(zone.title)}<br>${zone.lat.toFixed(5)}, ${zone.lon.toFixed(5)}</p><div class="zone-metric"><b>${near.length}</b><span>магазинов в радиусе 500 м<br>${documented} по источникам · ${near.length-documented} гипотез</span></div><label class="zone-scope"><input id="zone-use-filters" type="checkbox" ${zone.useFilters?'checked':''}> Учитывать фильтры карты</label><p class="inspect-note">${zone.useFilters?'Выборка ограничена текущими фильтрами.':'Все действующие конкуренты из таблицы, независимо от фильтров карты.'} ${zone.excludeKey?'Точка в центре исключена из подсчёта.':''} Расстояние по прямой, не время пути.</p><p class="inspect-sub">Сценарии конкуренции · нажмите для списка точек</p><div class="area-scenarios">${summary.map(s=>`<details class="area-scenario"><summary><span>${esc(s.name)}<small>${s.total?s.documented+' по источникам · '+s.hypothesis+' гипотез':'Не найдены в этой выгрузке'}</small></span><b>${s.total}</b></summary>${near.filter(x=>x.point.scenarios.includes(s.name)).map(x=>branchButton(x.point,x.metres)).join('')}</details>`).join('')}</div><p class="inspect-note">Магазин может участвовать в нескольких сценариях. Ноль означает отсутствие точек в данных, а не отсутствие конкуренции на рынке.</p>`;
  openInspector('area','Конкуренты в 500 метрах',body);
 }
+function fillNeighbourhoodFilter(){
+ const el=$('neighbourhood'),value=el.value;el.replaceChildren(new Option('Все микрорайоны',''));el.add(new Option('Владивосток: вне найденных контуров','__outside'));
+ for(const f of [...NEIGHBOURHOODS.features].sort((a,b)=>a.properties.name.localeCompare(b.properties.name,'ru'))){const n=DATA.filter(p=>p.areaIds.includes(f.properties.id)).length;el.add(new Option(`${f.properties.name} · ${n}`,f.properties.id));}
+ if([...el.options].some(o=>o.value===value))el.value=value;
+}
+function toggleNeighbourhoods(force){
+ neighbourhoodsEnabled=typeof force==='boolean'?force:!neighbourhoodsEnabled;
+ if(map&&neighbourhoodLayer){if(neighbourhoodsEnabled)neighbourhoodLayer.addTo(map);else map.removeLayer(neighbourhoodLayer);}
+ $('neighbourhoods').setAttribute('aria-pressed',String(neighbourhoodsEnabled));$('neighbourhoods').textContent=neighbourhoodsEnabled?'Микрорайоны: включены':'Микрорайоны и население';$('neighbourhood-legend').hidden=!neighbourhoodsEnabled;drawNeighbourhoods();
+}
+function drawNeighbourhoods(){
+ if(!neighbourhoodLayer)return;neighbourhoodLayer.clearLayers();if(!neighbourhoodsEnabled)return;
+ for(const f of NEIGHBOURHOODS.features){const p=f.properties,n=DATA.filter(s=>s.areaIds.includes(p.id)).length;
+ const layer=L.geoJSON(f,{style:{color:activeArea===p.id?'#855f38':'#8a8462',weight:activeArea===p.id?2.8:1.3,dashArray:p.conditional?'5 5':null,fillColor:activeArea===p.id?'#b8a06c':'#c5ca9c',fillOpacity:activeArea===p.id?.22:.10,bubblingMouseEvents:false}});
+ layer.bindTooltip(`${esc(p.name)} · ${p.population===null?'население н/д':'≈ '+(p.population===0&&p.population_raw>0?'<100':p.population.toLocaleString('ru-RU'))+' чел.'}<br>${n} конкурентов`,{className:'neighbourhood-label',sticky:true,direction:'top'});
+ layer.on('click',e=>{L.DomEvent.stopPropagation(e);renderNeighbourhood(p.id,true);});layer.addTo(neighbourhoodLayer);
+ }
+}
+function renderNeighbourhood(id,zoom=true){
+ const f=NEIGHBOURHOODS.features.find(f=>f.properties.id===id);if(!f)return;if(zoom)map?.closePopup();activeArea=id;const p=f.properties;
+ const all=DATA.filter(s=>s.areaIds.includes(id)),filtered=baseVisible.filter(s=>s.areaIds.includes(id));
+ const counts=MapFeatures.scenarioSummary(all.map(point=>({point})),[...new Set(DATA.flatMap(s=>s.scenarios))]);
+ const body=`<p class="inspect-sub">Владивосток · ${esc(p.boundary_status)}</p>${p.conditional?'<p class="inspect-note"><b>Условная граница.</b> '+esc(p.boundary_method)+' Оценка населения относится к рабочему контуру.</p>':''}<div class="population-figure">${p.population===null?'Нет оценки':(p.population===0&&p.population_raw>0?'&lt;100':'≈ '+p.population.toLocaleString('ru-RU'))}</div><div class="small">жителей · модель WorldPop ${p.population_year||'2025'} · сетка 100 м<br>Округлено до сотен, это не перепись микрорайона.</div><div class="neighbourhood-metrics"><div><b>${all.length}</b>конкурентов в контуре</div><div><b>${filtered.length}</b>в текущих фильтрах</div></div><button class="subtle-btn" type="button" data-neighbourhood-filter="${esc(id)}">Показать магазины микрорайона</button><p class="inspect-note">${esc(p.population_kind)}. ${p.area_km2?Number(p.area_km2).toLocaleString('ru-RU')+' км². ':''}Границы справочников могут пересекаться; население разных контуров нельзя складывать. Заселение новых домов после исходных данных модели может учитываться неполно.</p><div class="popup-links">${link(p.source,p.conditional?'Как построена зона':'Контур')}${link(p.anchor_source,'Адрес-ориентир')}${link(p.population_source,'Результат WorldPop')}${link(p.population_docs,'Методика WorldPop')}</div><p class="inspect-sub">Конкуренция по сценариям · все активные точки в контуре</p><div class="area-scenarios">${counts.filter(s=>s.total).map(s=>`<details class="area-scenario"><summary><span>${esc(s.name)}<small>${s.documented} по источникам · ${s.hypothesis} гипотез</small></span><b>${s.total}</b></summary>${all.filter(p=>p.scenarios.includes(s.name)).map(p=>branchButton(p)).join('')}</details>`).join('')||'<p class="small">В этой выгрузке точки не найдены.</p>'}</div><p class="inspect-note">Выручку филиалов сети не распределяем на адреса. Связь выручки с конкретным местом смотрите в карточке магазина.</p>`;
+ openInspector('neighbourhood',p.name,body);drawNeighbourhoods();if(zoom&&map){map.fitBounds(L.geoJSON(f).getBounds(),{paddingTopLeft:[35,40],paddingBottomRight:[map.getSize().x>720?390:45,40],maxZoom:15,animate:false});}
+}
+
 function parseSheet(resp){
  if(resp.status==='error')throw new Error(resp.errors?.[0]?.detailed_message||'Google не вернул таблицу');
  if(!resp.table?.cols)throw new Error('Ответ без таблицы');
@@ -124,7 +153,7 @@ function parseSheet(resp){
  for(const key of required)if(!labels.includes(key))throw new Error('Изменён заголовок: '+key);
  const idx=new Map(labels.map((h,i)=>[h,i]));
  const get=(r,h,raw=false)=>{const c=r.c[idx.get(h)];return raw?(c?.v??null):(c?.f??c?.v??'');};
- return resp.table.rows.map((r,i)=>hydrate({row:i+2,name:String(get(r,'Наименование')),city:get(r,'Населённый пункт'),district:get(r,'Район'),address:get(r,'Адрес'),operator_name:get(r,'Юрлицо / ИП (см. статус)'),operator_inn:String(get(r,'ИНН (см. статус)')).replace(/\s/g,''),link_status:get(r,'Статус привязки'),floor:get(r,'Этаж / помещение'),hours:get(r,'Время работы'),rubrics:get(r,'Описание / ассортимент по рубрикам 2ГИС'),lat:num(get(r,'Широта магазина',true)),lon:num(get(r,'Долгота магазина',true)),parking:get(r,'Парковка для фильтра'),parking_spaces:get(r,'Мест на ближайшей парковке'),parking_paid:get(r,'Ближайшая парковка платная'),parking_access:get(r,'Доступ к ближайшей парковке'),parking_distance:get(r,'До парковки по прямой, м'),parking_location:get(r,'Местоположение ближайшей парковки'),parking_url:get(r,'Карта ближайшей парковки'),format:get(r,'Формат для карты'),scenarios:get(r,'Сценарии конкуренции (оценка)'),tasks:get(r,'Задачи покупателя (примеры)'),basis:get(r,'Основание оценки ассортимента'),sources:String(get(r,'Источники ассортимента')).split('\n').filter(Boolean),card:get(r,'Карточка 2ГИС'),bfo_url:get(r,'Карточка ГИР БО'),revenue:get(r,'Выручка юрлица, руб. — повтор по филиалам',true),income:get(r,'Доходы юрлица ФНС, руб. — повтор',true)})).filter(p=>p.name);
+ return resp.table.rows.map((r,i)=>hydrate({row:i+2,name:String(get(r,'Наименование')),competitor_status:get(r,'Конкурент / нет'),neighbourhood:get(r,'Микрорайон (карта)'),population:num(get(r,'Население микрорайона, оценка 2025',true)),contacts:get(r,'Контакты (2ГИС)'),branch_count:get(r,'Филиалов по 2ГИС',true),location_revenue:get(r,'Выручка по адресу — ориентир юрлица, руб.',true),revenue_scope:get(r,'Статус выручки по адресу'),enrichment_note:get(r,'Источники / что уточнить'),city:get(r,'Населённый пункт'),district:get(r,'Район'),address:get(r,'Адрес'),operator_name:get(r,'Юрлицо / ИП (см. статус)'),operator_inn:String(get(r,'ИНН (см. статус)')).replace(/\s/g,''),link_status:get(r,'Статус привязки'),floor:get(r,'Этаж / помещение'),hours:get(r,'Время работы'),rubrics:get(r,'Описание / ассортимент по рубрикам 2ГИС'),lat:num(get(r,'Широта магазина',true)),lon:num(get(r,'Долгота магазина',true)),parking:get(r,'Парковка для фильтра'),parking_spaces:get(r,'Мест на ближайшей парковке'),parking_paid:get(r,'Ближайшая парковка платная'),parking_access:get(r,'Доступ к ближайшей парковке'),parking_distance:get(r,'До парковки по прямой, м'),parking_location:get(r,'Местоположение ближайшей парковки'),parking_url:get(r,'Карта ближайшей парковки'),format:get(r,'Формат для карты'),scenarios:get(r,'Сценарии конкуренции (оценка)'),tasks:get(r,'Задачи покупателя (примеры)'),basis:get(r,'Основание оценки ассортимента'),sources:String(get(r,'Источники ассортимента')).split('\n').filter(Boolean),card:get(r,'Карточка 2ГИС'),bfo_url:get(r,'Карточка ГИР БО'),revenue:get(r,'Выручка юрлица, руб. — повтор по филиалам',true),income:get(r,'Доходы юрлица ФНС, руб. — повтор',true)})).filter(p=>p.name);
 }
 function showSync(kind,text){$('sync').dataset.state=kind;$('sync').textContent=text;}
 function refresh(){
@@ -137,20 +166,20 @@ function refresh(){
  window[cb]=resp=>{
   if(done)return;
   try{
-   const next=parseSheet(resp);DATA=next;const date=new Date();lastLoaded='загружено '+date.toLocaleString('ru-RU');
-   try{localStorage.setItem(CACHE_KEY,JSON.stringify({schema:3,loaded:date.toISOString(),data:DATA}));}catch(e){}
+   const next=parseSheet(resp);applyData(next);const date=new Date();lastLoaded='загружено '+date.toLocaleString('ru-RU');
+   try{localStorage.setItem(CACHE_KEY,JSON.stringify({schema:4,loaded:date.toISOString(),data:ALL_DATA}));}catch(e){}
    fillFilters();rebuildMarkers();draw(false);done=true;cleanup();
    showSync('ok','Из Google Sheets · '+date.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}));
    $('sync-detail').textContent='Автообновление каждые 5 минут, пока карта открыта. Изменения Google могут появляться с небольшой задержкой.';
   }catch(e){fail(e.message);}
  };
- const params=new URLSearchParams({gid:GID,headers:'1',range:'A:AM',tqx:'responseHandler:'+cb+';reqId:'+Date.now()});
+ const params=new URLSearchParams({gid:GID,headers:'1',range:'A:AV',tqx:'responseHandler:'+cb+';reqId:'+Date.now()});
  script.src='https://docs.google.com/spreadsheets/d/'+SHEET_ID+'/gviz/tq?'+params;script.referrerPolicy='no-referrer';script.onerror=()=>fail('Не удалось прочитать общедоступный лист');document.head.append(script);
 }
-try{const cache=JSON.parse(localStorage.getItem(CACHE_KEY));if(cache?.schema===3&&Array.isArray(cache.data)){DATA=cache.data.map(hydrate);lastLoaded='кэш от '+new Date(cache.loaded).toLocaleString('ru-RU');}}catch(e){}
+try{const cache=JSON.parse(localStorage.getItem(CACHE_KEY));if(cache?.schema===4&&Array.isArray(cache.data)){applyData(cache.data);lastLoaded='кэш от '+new Date(cache.loaded).toLocaleString('ru-RU');}}catch(e){}
 const currentTime=MapFeatures.vladivostokTime();$('open-day').value=String(currentTime.day);
 initMap();fillFilters();rebuildMarkers();draw(true);showSync('loading',lastLoaded+' · обновляю…');
-for(const id of ['city','district','format','scenario','parking','confidence','hours-filter','open-day','open-time'])$(id).addEventListener('change',()=>{limit=60;draw(true);});
+for(const id of ['city','district','format','scenario','parking','confidence','finance-scope','hours-filter','open-day','open-time'])$(id).addEventListener('change',()=>{limit=60;draw(true);});
 $('search').addEventListener('input',()=>{limit=60;draw(false);});
 $('reset').addEventListener('click',()=>{resetFilters();activeNetwork=null;inspectorMode=null;$('inspector').hidden=true;draw(true);});
 $('more').addEventListener('click',()=>{limit+=60;draw(false);});
@@ -161,15 +190,18 @@ $('inspector-body').addEventListener('change',e=>{if(e.target.id==='zone-use-fil
 document.addEventListener('click',e=>{
  const point=e.target.closest('[data-point]');if(point){selectPlace(point.dataset.point);return;}
  const area=e.target.closest('[data-area-point]');if(area){const p=DATA.find(p=>p.key===area.dataset.areaPoint);if(p)analyseArea(p,p.name,p.key);return;}
+ const areaFilter=e.target.closest('[data-neighbourhood-filter]');if(areaFilter){resetFilters();activeNetwork=null;$('neighbourhood').value=areaFilter.dataset.neighbourhoodFilter;draw(true);renderNeighbourhood(areaFilter.dataset.neighbourhoodFilter,false);return;}
  const action=e.target.closest('[data-action]')?.dataset.action;
  if(action==='network-open')renderNetwork();
  if(action==='network-clear'){activeNetwork=null;inspectorMode=null;$('inspector').hidden=true;draw(true);}
  if(action==='network-all'){resetFilters();inspectorMode='network';draw(true);renderNetwork();}
 });
+$('neighbourhoods').addEventListener('click',()=>toggleNeighbourhoods());
+$('neighbourhood').addEventListener('change',()=>{limit=60;draw(false);const f=NEIGHBOURHOODS.features.find(f=>f.properties.id===$('neighbourhood').value);if(f){toggleNeighbourhoods(true);renderNeighbourhood(f.properties.id,true);}});
 $('refresh').addEventListener('click',refresh);$('detail-close').addEventListener('click',()=>$('detail').close());
 $('csv').addEventListener('click',()=>{
  const quote=x=>'"'+String(x??'').replaceAll('"','""')+'"';
- const rows=[['Название','Адрес','Этаж','Район','Сценарии конкуренции','Основание оценки','Парковка','Мест','Платная','Доступ','До парковки, м','Широта','Долгота','ИНН','Юрлицо','2ГИС'],...visible.map(p=>[p.name,p.address,p.floor,p.district,p.scenarios.join('; '),p.basis,p.parking,p.parking_spaces,p.parking_paid,p.parking_access,p.parking_distance,p.lat,p.lon,p.operator_inn,p.operator_name,p.card])];
+ const rows=[['Название','Адрес','Этаж','Микрорайон','Статус выручки по адресу','Выручка — ориентир юрлица','Район','Сценарии конкуренции','Основание оценки','Парковка','Мест','Платная','Доступ','До парковки, м','Широта','Долгота','ИНН','Юрлицо','2ГИС'],...visible.map(p=>[p.name,p.address,p.floor,p.neighbourhood,p.revenue_scope,p.location_revenue,p.district,p.scenarios.join('; '),p.basis,p.parking,p.parking_spaces,p.parking_paid,p.parking_access,p.parking_distance,p.lat,p.lon,p.operator_inn,p.operator_name,p.card])];
  const url=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(quote).join(';')).join('\r\n')],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='Кладовка — выбранные конкуренты.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
 });
 refresh();setInterval(()=>{if(!document.hidden)refresh();},300000);

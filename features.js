@@ -1,6 +1,10 @@
 /* Geographic distances, branch grouping, and weekly opening-hour interpretation. */
 const MapFeatures=(()=>{
  const fold=s=>String(s??'').toLocaleLowerCase('ru').replaceAll('ё','е').replace(/\s+/g,' ').trim();
+ function isCompetitor(p){return !['нет','не конкурент','исключен','false','0','no'].includes(fold(p.competitor_status));}
+ function pointInRing(p,ring){let inside=false;for(let i=0,j=ring.length-1;i<ring.length;j=i++){const [x,y]=ring[i],[a,b]=ring[j];const cross=(p.lon-x)*(b-y)-(p.lat-y)*(a-x);if(Math.abs(cross)<1e-10&&p.lon>=Math.min(x,a)&&p.lon<=Math.max(x,a)&&p.lat>=Math.min(y,b)&&p.lat<=Math.max(y,b))return true;if((y>p.lat)!==(b>p.lat)&&p.lon<(a-x)*(p.lat-y)/(b-y)+x)inside=!inside;}return inside;}
+ function inGeometry(p,g){if(!Number.isFinite(p.lat)||!Number.isFinite(p.lon))return false;const polygons=g.type==='MultiPolygon'?g.coordinates:[g.coordinates];return polygons.some(rings=>pointInRing(p,rings[0])&&!rings.slice(1).some(r=>pointInRing(p,r)));}
+ function areasFor(p,features){return features.filter(f=>inGeometry(p,f.geometry)).sort((a,b)=>(a.properties.area_km2??Infinity)-(b.properties.area_km2??Infinity));}
  const dayNames=['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
  const hourCache=new Map();
  function distance(a,b){
@@ -73,5 +77,5 @@ const MapFeatures=(()=>{
   const groups=new Map();for(const p of points){const info=networkInfo(p);if(!groups.has(info.key))groups.set(info.key,{...info,points:[]});groups.get(info.key).points.push(p);}
   return [...groups.values()].sort((a,b)=>b.points.length-a.points.length||a.title.localeCompare(b.title,'ru'));
  }
- return {distance,neighbours,scenarioSummary,vladivostokTime,parseHours,isOpen,hoursMatch,networkInfo,groupNetworks,dayNames};
+ return {isCompetitor,inGeometry,areasFor,distance,neighbours,scenarioSummary,vladivostokTime,parseHours,isOpen,hoursMatch,networkInfo,groupNetworks,dayNames};
 })();
