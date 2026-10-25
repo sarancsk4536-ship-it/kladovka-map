@@ -199,7 +199,7 @@ function refresh(){
   if(done)return;
   try{
    const next=parseSheet(resp);applyData(next);const date=new Date();lastLoaded='загружено '+date.toLocaleString('ru-RU');
-   try{localStorage.setItem(CACHE_KEY,JSON.stringify({schema:5,loaded:date.toISOString(),data:ALL_DATA}));}catch(e){}
+   try{localStorage.removeItem('kladovka-map-v4-'+GID);localStorage.setItem(CACHE_KEY,JSON.stringify({schema:5,loaded:date.toISOString(),data:ALL_DATA.map(({category_links,unknown_categories,inactive_categories,categories,scenarios,tasks,...source})=>source)}));}catch(e){}
    fillFilters();rebuildMarkers();draw(false);done=true;cleanup();window.KladovkaRecommendations?.readScenarios(true);
    showSync('ok','Из Google Sheets · '+date.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}));
    $('sync-detail').textContent='Автообновление каждые 5 минут, пока карта открыта. Изменения Google могут появляться с небольшой задержкой.';
