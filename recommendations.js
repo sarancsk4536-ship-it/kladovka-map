@@ -14,7 +14,7 @@ window.KladovkaRecommendations=(()=>{
  const save=()=>{try{localStorage.setItem(key,JSON.stringify({settings:state.settings,assumptions:state.assumptions}));}catch(e){}};
  const scenarios=()=>[...new Set(($('scenario').value?[$('scenario').value]:state.scenarios).filter(Boolean))];
  function filters(){
-  const ids=['city','district','neighbourhood','scenario','parking','format','confidence','finance-scope','hours-filter'];
+  const ids=['city','district','neighbourhood','scenario','parking','format','finance-scope','hours-filter'];
   const parts=ids.filter(id=>$(id).value).map(id=>$(id).selectedOptions[0]?.textContent||$(id).value);
   if($('search').value)parts.push('Поиск: '+$('search').value);
   if(activeNetwork)parts.push('Сеть: '+(MapFeatures.groupNetworks(DATA).find(g=>g.key===activeNetwork)?.title||activeNetwork));
@@ -60,7 +60,7 @@ window.KladovkaRecommendations=(()=>{
   const cb='kladovkaScenarios'+Date.now(),script=document.createElement('script');let done=false;
   const cleanup=()=>{done=true;state.scenarioBusy=false;clearTimeout(timer);script.remove();window[cb]=()=>{};setTimeout(()=>delete window[cb],60000);};
   const timer=setTimeout(cleanup,25000);
-  window[cb]=resp=>{if(done)return;try{if(resp.status==='error'||resp.table?.cols?.[0]?.label?.trim()!=='Общий сценарий')throw Error('Не прочитаны сценарии');const list=[...new Set(resp.table.rows.map(r=>String(r.c?.[0]?.v||'').trim()).filter(Boolean))];if(!list.length)throw Error('Пустой сценарий');state.scenarios=list;state.scenarioSource='живой лист «Ассортимент»';state.scenarioLoaded=Date.now();cleanup();update();}catch(e){cleanup();}};
+  window[cb]=resp=>{if(done)return;try{if(resp.status==='error'||resp.table?.cols?.[0]?.label?.trim()!=='Общий сценарий')throw Error('Не прочитаны сценарии');const list=[...new Set(resp.table.rows.map(r=>String(r.c?.[0]?.v||'').trim()).filter(Boolean))];if(!list.length)throw Error('Пустой сценарий');state.scenarios=list;state.scenarioSource='живой лист «Ассортимент»';state.scenarioLoaded=Date.now();cleanup();update();window.KladovkaHypotheses?.update();}catch(e){cleanup();}};
   script.src='https://docs.google.com/spreadsheets/d/'+SHEET_ID+'/gviz/tq?'+new URLSearchParams({gid:'0',headers:'1',range:'A:A',tqx:'responseHandler:'+cb+';reqId:'+Date.now()});script.onerror=cleanup;script.referrerPolicy='no-referrer';document.head.append(script);
  }
  function applySettings(){const fields={'rec-min-pop':['minPopulation',0,100000],'rec-pop-target':['populationTarget',100,100000],'rec-pop-weight':['populationWeight',0,100],'rec-upper-penalty':['upperFloorPenalty',0,100]};for(const [id,[k,min,max]]of Object.entries(fields)){const input=$(id);if(input)state.settings[k]=safeNumber(input.value,min,max,state.settings[k]);}save();compute(true);}
@@ -80,5 +80,5 @@ window.KladovkaRecommendations=(()=>{
   if(id==='rec-point-floor'||id==='rec-point-parking'){const point=e.target.dataset.recPoint;state.assumptions[point]=state.assumptions[point]||{};if(id==='rec-point-floor'){if(value==='inherit')delete state.assumptions[point].floor;else state.assumptions[point].floor=value;save();compute(true);}else{state.assumptions[point].parking=value;save();card(point,false);}}
  });
  setInterval(()=>{if(state.enabled&&!document.hidden)readScenarios();},300000);
- return {update};
+ return {update,scenarios,settings:()=>({...state.settings}),filterDescription:filters,readScenarios};
 })();
