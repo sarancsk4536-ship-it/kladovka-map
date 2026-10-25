@@ -24,7 +24,7 @@ function optionList(id,key,first){
  for(const [v,n] of [...counts].sort((a,b)=>a[0].localeCompare(b[0],'ru')))el.add(new Option(`${v} · ${n}`,v));
  if([...el.options].some(o=>o.value===value))el.value=value;
 }
-function fillFilters(){optionList('city','city','Все населённые пункты');optionList('district','district','Все районы');optionList('format','format','Все форматы');optionList('scenario','scenarios','Все сценарии');optionList('parking','parking','Любая ситуация с парковкой');fillNeighbourhoodFilter();}
+function fillFilters(){optionList('city','city','Все населённые пункты');optionList('district','district','Все районы');optionList('format','format','Все форматы');optionList('scenario','scenarios','Все сценарии');optionList('parking','parking','Любая ситуация с парковкой');fillNeighbourhoodFilter();$('finance-scope').querySelector('option[value=address]').textContent='Есть ориентир по адресу · '+DATA.filter(p=>num(p.location_revenue)!==null).length;}
 function link(url,label){return href(url)?`<a href="${href(url)}" target="_blank" rel="noopener noreferrer">${esc(label)} ↗</a>`:'';}
 function popup(p){
  const access={'residents_only':'только для жителей','handicapped_only':'только для людей с инвалидностью','emobile_only':'только для электромобилей','landing_place':'место высадки','Общедоступная':'общедоступная'}[p.parking_access]||p.parking_access||'не указан';
@@ -149,7 +149,7 @@ function parseSheet(resp){
  if(resp.status==='error')throw new Error(resp.errors?.[0]?.detailed_message||'Google не вернул таблицу');
  if(!resp.table?.cols)throw new Error('Ответ без таблицы');
  const labels=resp.table.cols.map(c=>String(c.label||'').trim());
- const required=['Наименование','Широта магазина','Долгота магазина','Сценарии конкуренции (оценка)','Парковка для фильтра'];
+ const required=['Конкурент / нет','Наименование','Широта магазина','Долгота магазина','Сценарии конкуренции (оценка)','Парковка для фильтра'];
  for(const key of required)if(!labels.includes(key))throw new Error('Изменён заголовок: '+key);
  const idx=new Map(labels.map((h,i)=>[h,i]));
  const get=(r,h,raw=false)=>{const c=r.c[idx.get(h)];return raw?(c?.v??null):(c?.f??c?.v??'');};
